@@ -5,6 +5,9 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
+// Data Class untuk menyimpan struktur data harga per item
+data class PriceRecord(val priceId: Long, val productName: String, val storeName: String, val price: Double)
+
 class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
     
     companion object {
@@ -25,14 +28,29 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
         onCreate(db)
     }
 
+    // Fungsi pintar: Cek jika toko/produk sudah ada, gunakan ID lama. Jika belum, buat baru.
     fun addStore(name: String): Long {
         val db = this.writableDatabase
+        val cursor = db.rawQuery("SELECT id FROM stores WHERE nama_toko = ? COLLATE NOCASE", arrayOf(name))
+        if (cursor.moveToFirst()) {
+            val id = cursor.getLong(0)
+            cursor.close()
+            return id
+        }
+        cursor.close()
         val values = ContentValues().apply { put("nama_toko", name) }
         return db.insert("stores", null, values)
     }
 
     fun addProduct(name: String): Long {
         val db = this.writableDatabase
+        val cursor = db.rawQuery("SELECT id FROM products WHERE nama_produk = ? COLLATE NOCASE", arrayOf(name))
+        if (cursor.moveToFirst()) {
+            val id = cursor.getLong(0)
+            cursor.close()
+            return id
+        }
+        cursor.close()
         val values = ContentValues().apply { put("nama_produk", name) }
         return db.insert("products", null, values)
     }
@@ -47,38 +65,53 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
         return db.insert("prices", null, values)
     }
 
-    fun getComparedPrices(): String {
+    // Fungsi Query dengan Fitur Pencarian (Search)
+    fun getPrices(queryStr: String = ""): List<PriceRecord> {
         val db = this.readableDatabase
-        val query = """
-            SELECT p.nama_produk, s.nama_toko, pr.nominal_harga 
+        val list = mutableListOf<PriceRecord>()
+        
+        val query = if (queryStr.isEmpty()) {
+            """
+            SELECT pr.id, p.nama_produk, s.nama_toko, pr.nominal_harga 
             FROM prices pr
             JOIN products p ON pr.product_id = p.id
             JOIN stores s ON pr.store_id = s.id
             ORDER BY p.nama_produk ASC, pr.nominal_harga ASC
-        """.trimIndent()
+            """.trimIndent()
+        } else {
+            """
+            SELECT pr.id, p.nama_produk, s.nama_toko, pr.nominal_harga 
+            FROM prices pr
+            JOIN products p ON pr.product_id = p.id
+            JOIN stores s ON pr.store_id = s.id
+            WHERE p.nama_produk LIKE '%$queryStr%' OR s.nama_toko LIKE '%$queryStr%'
+            ORDER BY p.nama_produk ASC, pr.nominal_harga ASC
+            """.trimIndent()
+        }
         
         val cursor = db.rawQuery(query, null)
-        val result = StringBuilder()
-        
         if (cursor.moveToFirst()) {
             do {
-                val product = cursor.getString(0)
-                val store = cursor.getString(1)
-                val price = cursor.getDouble(2)
-                result.append("🏷️ $product\n🏪 $store | Rp $price\n\n")
+                list.add(PriceRecord(
+                    priceId = cursor.getLong(0),
+                    productName = cursor.getString(1),
+                    storeName = cursor.getString(2),
+                    price = cursor.getDouble(3)
+                ))
             } while (cursor.moveToNext())
-        } else {
-            result.append("Belum ada data perbandingan harga.")
         }
         cursor.close()
-        return result.toString()
+        return list
     }
 
-    // --- FUNGSI BARU UNTUK MENGHAPUS SEMUA DATA ---
-    fun clearAllData() {
+    fun updatePrice(priceId: Long, newPrice: Double) {
         val db = this.writableDatabase
-        db.execSQL("DELETE FROM prices")
-        db.execSQL("DELETE FROM products")
-        db.execSQL("DELETE FROM stores")
+        val values = ContentValues().apply { put("nominal_harga", newPrice) }
+        db.update("prices", values, "id=?", arrayOf(priceId.toString()))
+    }
+
+    fun deletePrice(priceId: Long) {
+        val db = this.writableDatabase
+        db.delete("prices", "id=?", arrayOf(priceId.toString()))
     }
 }
